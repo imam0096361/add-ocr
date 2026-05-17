@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OCR to Editable Word</title>
+    <link rel="stylesheet" href="../static/app.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">OCR</div>
+          <div>
+            <h1>Editable Notice Converter</h1>
+            <p>Bangla and English scanned PDFs to editable Word files</p>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="apiKeyBtn" type="button">API Key</button>
+          <button id="exportBtn" disabled>Export DOCX</button>
+        </div>
+      </header>
+
+      <section class="controls">
+        <form id="uploadForm">
+          <label class="field file-field">
+            PDF
+            <input type="file" name="file" accept="application/pdf" />
+          </label>
+          <label class="field">
+            Demo PDF
+            <select name="demo_pdf" id="demoPdf">
+              <option value="">Choose demo...</option>
+            </select>
+          </label>
+          <label class="field">
+            Model
+            <select name="model">
+              <option value="gemini-3.1-pro-preview">3.1</option>
+              <option value="gemini-3-flash-preview">3</option>
+              <option value="gemini-2.5-flash">2.5</option>
+            </select>
+          </label>
+          <label class="check">
+            <input type="checkbox" name="force_demo" />
+            Demo/reference mode
+          </label>
+          <button type="submit" class="primary-action">Convert</button>
+        </form>
+        <div id="status" class="status">Ready</div>
+      </section>
+
+      <section id="warnings" class="warnings" hidden></section>
+
+      <section class="workspace">
+        <aside>
+          <h2>Pages</h2>
+          <div id="pageList" class="page-list"></div>
+        </aside>
+        <section class="preview">
+          <img id="pageImage" alt="Rendered PDF page" />
+        </section>
+        <section class="editor">
+          <h2>Editable OCR Blocks</h2>
+          <div id="blockEditor"></div>
+        </section>
+      </section>
+
+      <section id="downloads" class="downloads" hidden>
+        <a id="faithfulLink">Exact visual DOCX</a>
+        <a id="editableFaithfulLink">Editable faithful DOCX</a>
+        <a id="columnLink">Column-ready DOCX</a>
+        <a id="bijoyLink">Bijoy/SutonnyMJ DOCX</a>
+      </section>
+
+      <dialog id="apiKeyDialog">
+        <form method="dialog" id="apiKeyForm" class="dialog-panel">
+          <h2>Gemini API Key</h2>
+          <p id="apiKeyHelp">Add GEMINI_API_KEY in .env.local, or save it here for this computer.</p>
+          <input id="apiKeyInput" name="api_key" type="password" autocomplete="off" placeholder="Paste Gemini API key" />
+          <div class="dialog-actions">
+            <button type="button" id="clearApiKeyBtn">Clear</button>
+            <button type="button" id="closeApiKeyBtn">Cancel</button>
+            <button type="submit">Save</button>
+          </div>
+        </form>
+      </dialog>
+    </main>
+    <script src="../static/app.js"></script>
+  </body>
+</html>
