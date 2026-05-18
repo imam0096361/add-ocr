@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import uuid
 from pathlib import Path
@@ -9,10 +10,10 @@ from .models import DocumentLayout
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = ROOT / "data"
+DATA_DIR = Path(os.getenv("OCR_DATA_DIR", ROOT / "data"))
 JOBS_DIR = DATA_DIR / "jobs"
-DEMO_DIRECT_MATTER = ROOT / "abc" / "Direct Matter"
-DEMO_PREPARE_MATTER = ROOT / "abc" / "Prepare Matter"
+DEMO_DIRECT_MATTER = Path(os.getenv("OCR_DEMO_DIRECT_MATTER", ROOT / "abc" / "Direct Matter"))
+DEMO_PREPARE_MATTER = Path(os.getenv("OCR_DEMO_PREPARE_MATTER", ROOT / "abc" / "Prepare Matter"))
 
 
 def ensure_dirs() -> None:

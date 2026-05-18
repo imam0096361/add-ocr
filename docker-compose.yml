@@ -1,0 +1,19 @@
+services:
+  add-ocr:
+    build:
+      context: .
+    image: add-ocr:latest
+    container_name: add-ocr
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env.local
+        required: false
+    environment:
+      OCR_DATA_DIR: /app/data
+    volumes:
+      - add_ocr_data:/app/data
+
+volumes:
+  add_ocr_data:

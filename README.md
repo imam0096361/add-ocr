@@ -13,6 +13,40 @@ npm install
 
 Open http://127.0.0.1:8000.
 
+## Ubuntu Docker Run
+
+Install Docker and the Compose plugin on Ubuntu, then run the app from this project folder:
+
+```bash
+cp .env.docker.example .env.local
+nano .env.local
+docker compose up -d --build
+```
+
+Open:
+
+```text
+http://SERVER_IP:8000
+```
+
+For local Ubuntu desktop:
+
+```text
+http://127.0.0.1:8000
+```
+
+Useful commands:
+
+```bash
+docker compose logs -f
+docker compose restart
+docker compose down
+```
+
+Generated jobs and DOCX exports are stored in the Docker volume `add_ocr_data`, mounted at `/app/data` inside the container. The browser download buttons are the easiest way to collect `column-ready.docx` and `column-ready-bijoy.docx`.
+
+Full Ubuntu server steps are in [deploy/ubuntu-docker.md](deploy/ubuntu-docker.md).
+
 ## Gemini key
 
 Create `.env.local` in this project folder:

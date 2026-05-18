@@ -8,9 +8,12 @@ from PIL import Image, ImageDraw
 
 from ocr_app.bijoy import convert_unicode_to_bijoy
 from ocr_app.docx_builder import export_all
+from ocr_app.docx_builder import build_docx
 from ocr_app.docx_builder import _content_width_weights
+from ocr_app.docx_builder import _crop_artifact
 from ocr_app.docx_builder import _detect_table_grid_geometry
 from ocr_app.docx_builder import _apply_table_geometry
+from ocr_app.docx_builder import _prepare_faithful_blocks
 from ocr_app.main import app
 from ocr_app.models import BoundingBox, DocumentLayout, LayoutBlock, PageLayout, TableBlock, TableCell
 from ocr_app.ocr import extract_layout
@@ -196,6 +199,94 @@ def test_generic_tender_table_does_not_use_colon_form_widths() -> None:
     assert weights[2] > 0.20
     assert weights[2] > weights[0]
     assert weights[3] > 0.16
+
+
+def test_faithful_blocks_snap_memo_and_date_to_same_row() -> None:
+    blocks = [
+        LayoutBlock(
+            id="memo",
+            type="paragraph",
+            text="Memo No. 59.14.8100.028.59.008.26-1505",
+            bbox=BoundingBox(x=0.169, y=0.167, w=0.321, h=0.017),
+            confidence=1,
+            alignment="left",
+        ),
+        LayoutBlock(
+            id="date",
+            type="paragraph",
+            text="Date:03-05-2026",
+            bbox=BoundingBox(x=0.776, y=0.162, w=0.13, h=0.018),
+            confidence=1,
+            alignment="right",
+        ),
+    ]
+    prepared = {block.id: block for block in _prepare_faithful_blocks(blocks)}
+    assert prepared["memo"].bbox.y == prepared["date"].bbox.y
+
+
+def test_signature_artifact_crop_expands_to_visible_ink(tmp_path) -> None:
+    image_path = tmp_path / "page.png"
+    image = Image.new("RGB", (500, 500), "white")
+    draw = ImageDraw.Draw(image)
+    draw.line((330, 330, 450, 305), fill="black", width=5)
+    image.save(image_path)
+    block = LayoutBlock(
+        id="sig",
+        type="artifact",
+        artifact_type="signature",
+        bbox=BoundingBox(x=0.70, y=0.61, w=0.04, h=0.025),
+        confidence=1,
+    )
+    crop = _crop_artifact(block, image_path, tmp_path, 0)
+    assert crop is not None
+    cropped = Image.open(crop).convert("L")
+    assert sum(1 for value in cropped.getdata() if value < 185) > 50
+
+
+def test_column_export_uses_detected_signature_artifact_not_inferred_crop(tmp_path) -> None:
+    image_path = tmp_path / "page.png"
+    image = Image.new("RGB", (800, 1000), "white")
+    draw = ImageDraw.Draw(image)
+    draw.line((525, 810, 670, 775), fill="black", width=5)
+    image.save(image_path)
+    layout = DocumentLayout(
+        source_pdf="sample.pdf",
+        pages=[
+            PageLayout(
+                page_index=0,
+                width_px=800,
+                height_px=1000,
+                image_path=str(image_path),
+                blocks=[
+                    LayoutBlock(
+                        id="left_signatory",
+                        type="paragraph",
+                        text="Left officer\nDesignation\nOffice",
+                        bbox=BoundingBox(x=0.18, y=0.78, w=0.28, h=0.08),
+                        confidence=1,
+                    ),
+                    LayoutBlock(
+                        id="right_signatory",
+                        type="paragraph",
+                        text="Right officer\nDesignation\nOffice",
+                        bbox=BoundingBox(x=0.58, y=0.78, w=0.28, h=0.08),
+                        confidence=1,
+                    ),
+                    LayoutBlock(
+                        id="sig_artifact",
+                        type="artifact",
+                        artifact_type="signature",
+                        bbox=BoundingBox(x=0.66, y=0.79, w=0.05, h=0.025),
+                        confidence=1,
+                    ),
+                ],
+            )
+        ],
+    )
+    build_docx(layout, tmp_path / "column.docx", mode="column", bijoy=False)
+    crop_dir = tmp_path / "artifact-crops"
+    assert (crop_dir / "page-1-sig_artifact.png").exists()
+    assert not list(crop_dir.glob("page-1-signature-*.png"))
 
 
 def test_table_geometry_uses_source_grid_line_ratios(tmp_path) -> None:

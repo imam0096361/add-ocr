@@ -6,14 +6,14 @@ from pathlib import Path
 from docx import Document
 from docx.enum.section import WD_SECTION
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 from PIL import Image
 
 from .bijoy import split_bijoy_font_runs
-from .models import BlockType, DocumentLayout, LayoutBlock, TableBlock
+from .models import BlockType, BoundingBox, DocumentLayout, LayoutBlock, TableBlock
 from .validation import validate_layout
 
 
@@ -57,17 +57,18 @@ def build_docx(layout: DocumentLayout, output_path: Path, mode: str, bijoy: bool
         if page_index:
             doc.add_section(WD_SECTION.NEW_PAGE)
         _setup_section(doc.sections[-1], mode=mode)
-        signature_blocks = _find_bottom_signature_blocks(page.blocks)
+        page_blocks = _prepare_faithful_blocks(page.blocks) if mode == "faithful" else page.blocks
+        signature_blocks = _find_bottom_signature_blocks(page_blocks) if mode == "faithful" else []
         signature_ids = {block.id for block in signature_blocks}
-        for block in sorted(page.blocks, key=lambda b: (b.bbox.y, b.bbox.x)):
+        for block in sorted(page_blocks, key=lambda b: (b.bbox.y, b.bbox.x)):
             if block.id in signature_ids:
                 continue
-            if signature_blocks and block.type == BlockType.ARTIFACT and block.bbox.y > 0.68:
+            if mode == "faithful" and signature_blocks and block.type == BlockType.ARTIFACT and block.bbox.y > 0.68:
                 continue
             if block.type == BlockType.TABLE and block.table:
                 warnings.extend(_add_table(doc, block, Path(page.image_path), compact=(mode == "faithful"), bijoy=bijoy))
             elif block.type == BlockType.ARTIFACT:
-                _add_artifact(doc, block, Path(page.image_path), output_path.parent, page_index)
+                _add_artifact(doc, block, Path(page.image_path), output_path.parent, page_index, faithful=(mode == "faithful"))
             else:
                 warnings.extend(_add_text_block(doc, block, faithful=(mode == "faithful"), bijoy=bijoy))
         if signature_blocks:
@@ -167,19 +168,72 @@ def _add_text_block(doc: Document, block: LayoutBlock, faithful: bool, bijoy: bo
     style = "Heading 1" if block.type == BlockType.HEADING else "Normal"
     p = doc.add_paragraph(style=style)
     p.alignment = _alignment_from_bbox(block)
-    p.paragraph_format.space_after = Pt(3 if faithful else 6)
-    p.paragraph_format.line_spacing = 1.05 if faithful else 1.15
+    p.paragraph_format.space_before = Pt(0)
+    p.paragraph_format.space_after = Pt(0 if faithful else 6)
+    font_size = _faithful_font_size(block) if faithful else Pt(11)
+    if faithful:
+        p.paragraph_format.line_spacing = _faithful_line_spacing(block, font_size)
+        p.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    else:
+        p.paragraph_format.line_spacing = 1.15
     if faithful:
         _apply_faithful_paragraph_geometry(p, block)
     return _add_multiline_run(
         p,
         block.text,
         font_name=BIJOY_FONT if bijoy else UNICODE_BANGLA_FONT,
-        size=Pt(10 if faithful else 11),
+        size=font_size,
         bold=block.type == BlockType.HEADING,
         underline=block.underline,
         bijoy_mixed=bijoy,
     )
+
+
+def _prepare_faithful_blocks(blocks: list[LayoutBlock]) -> list[LayoutBlock]:
+    prepared = [block.model_copy(deep=True) for block in blocks]
+    text_blocks = [
+        block
+        for block in prepared
+        if block.type in {BlockType.PARAGRAPH, BlockType.HEADING}
+        and block.bbox.h <= 0.035
+        and "\n" not in block.text
+    ]
+    groups: list[list[LayoutBlock]] = []
+    for block in sorted(text_blocks, key=lambda item: item.bbox.y + item.bbox.h / 2):
+        center = block.bbox.y + block.bbox.h / 2
+        for group in groups:
+            group_center = sum(item.bbox.y + item.bbox.h / 2 for item in group) / len(group)
+            if abs(center - group_center) <= 0.008:
+                group.append(block)
+                break
+        else:
+            groups.append([block])
+    for group in groups:
+        if len(group) < 2:
+            continue
+        group.sort(key=lambda item: item.bbox.x)
+        if group[-1].bbox.x - group[0].bbox.x < 0.25:
+            continue
+        shared_y = min(item.bbox.y for item in group)
+        for block in group:
+            block.bbox.y = shared_y
+    return prepared
+
+
+def _faithful_font_size(block: LayoutBlock):
+    line_count = max(1, len(block.text.splitlines()))
+    box_height_pt = max(6.0, block.bbox.h * A4_HEIGHT_CM * 28.346)
+    size = box_height_pt / max(1.18, line_count * 1.18)
+    if block.type == BlockType.HEADING:
+        size *= 1.03
+    return Pt(max(6.5, min(13.0, size)))
+
+
+def _faithful_line_spacing(block: LayoutBlock, font_size):
+    line_count = max(1, len(block.text.splitlines()))
+    box_height_pt = max(font_size.pt * line_count, block.bbox.h * A4_HEIGHT_CM * 28.346)
+    line_spacing = box_height_pt / line_count
+    return Pt(max(font_size.pt * 1.02, min(font_size.pt * 1.45, line_spacing)))
 
 
 def _add_multiline_run(
@@ -758,16 +812,18 @@ def _set_cell_shading(cell, fill: str) -> None:
     shd.set(qn("w:fill"), fill)
 
 
-def _add_artifact(doc: Document, block: LayoutBlock, page_image: Path, output_dir: Path, page_index: int) -> None:
+def _add_artifact(
+    doc: Document, block: LayoutBlock, page_image: Path, output_dir: Path, page_index: int, faithful: bool = False
+) -> None:
     crop_path = Path(block.image_path) if block.image_path else _crop_artifact(block, page_image, output_dir, page_index)
     p = doc.add_paragraph()
     p.alignment = _alignment_from_bbox(block)
     p.paragraph_format.space_before = Pt(0)
     p.paragraph_format.space_after = Pt(0)
-    if block.bbox.y > 0.55:
-        _apply_faithful_paragraph_geometry(p, block)
+    if faithful or block.bbox.y > 0.55:
+        _apply_faithful_paragraph_geometry(p, _artifact_frame_block(block, page_image) if faithful else block)
     if crop_path and crop_path.exists():
-        width_cm = max(1.4, min(5.0, block.bbox.w * A4_WIDTH_CM))
+        width_cm = _artifact_image_width_cm(block, crop_path)
         run = p.add_run()
         run.add_picture(str(crop_path), width=Cm(width_cm))
         return
@@ -861,6 +917,18 @@ def _signature_image_width_cm(block: LayoutBlock) -> float:
     return max(2.4, min(4.4, block.bbox.w * A4_WIDTH_CM * 0.58))
 
 
+def _artifact_image_width_cm(block: LayoutBlock, crop_path: Path) -> float:
+    try:
+        with Image.open(crop_path) as img:
+            aspect_ratio = img.width / max(1, img.height)
+    except OSError:
+        aspect_ratio = 3.0
+    base_width = block.bbox.w * A4_WIDTH_CM
+    if block.artifact_type in {"signature", "handwriting"}:
+        return max(2.6, min(5.8, max(base_width, aspect_ratio * 0.65)))
+    return max(1.4, min(5.0, base_width))
+
+
 def _crop_signature_above_text(
     block: LayoutBlock, page_image: Path, output_dir: Path, page_index: int
 ) -> Path | None:
@@ -931,19 +999,74 @@ def _crop_artifact(block: LayoutBlock, page_image: Path, output_dir: Path, page_
     artifact_dir.mkdir(parents=True, exist_ok=True)
     with Image.open(page_image) as img:
         width, height = img.size
-        left = int(block.bbox.x * width)
-        top = int(block.bbox.y * height)
-        right = int((block.bbox.x + block.bbox.w) * width)
-        bottom = int((block.bbox.y + block.bbox.h) * height)
+        left, top, right, bottom = _artifact_crop_box(block, width, height)
         if right <= left or bottom <= top or (right - left) < 12 or (bottom - top) < 12:
             return None
-        pad_x = max(4, int((right - left) * 0.08))
-        pad_y = max(4, int((bottom - top) * 0.12))
-        left = max(0, left - pad_x)
-        right = min(width, right + pad_x)
-        top = max(0, top - pad_y)
-        bottom = min(height, bottom + pad_y)
         crop = img.crop((left, top, right, bottom)).convert("RGB")
         out = artifact_dir / f"page-{page_index + 1}-{block.id}.png"
         crop.save(out)
         return out
+
+
+def _artifact_frame_block(block: LayoutBlock, page_image: Path) -> LayoutBlock:
+    if block.artifact_type not in {"signature", "handwriting"} or not page_image.exists():
+        return block
+    try:
+        with Image.open(page_image) as img:
+            width, height = img.size
+            left, top, right, bottom = _artifact_crop_box(block, width, height)
+    except OSError:
+        return block
+    frame_block = block.model_copy(deep=True)
+    frame_block.bbox = BoundingBox(
+        x=max(0.0, min(1.0, left / width)),
+        y=max(0.0, min(1.0, top / height)),
+        w=max(0.01, min(1.0, (right - left) / width)),
+        h=max(0.01, min(1.0, (bottom - top) / height)),
+    )
+    return frame_block
+
+
+def _artifact_crop_box(block: LayoutBlock, width: int, height: int) -> tuple[int, int, int, int]:
+    left = int(block.bbox.x * width)
+    top = int(block.bbox.y * height)
+    right = int((block.bbox.x + block.bbox.w) * width)
+    bottom = int((block.bbox.y + block.bbox.h) * height)
+    box_width = max(1, right - left)
+    box_height = max(1, bottom - top)
+    if block.artifact_type in {"signature", "handwriting"}:
+        expand_x = max(int(width * 0.045), int(box_width * 0.55))
+        expand_top = max(int(height * 0.09), int(box_height * 2.50))
+        expand_bottom = max(int(height * 0.035), int(box_height * 1.45))
+        return (
+            max(0, left - expand_x),
+            max(0, top - expand_top),
+            min(width, right + expand_x),
+            min(height, bottom + expand_bottom),
+        )
+    pad_x = max(4, int(box_width * 0.08))
+    pad_y = max(4, int(box_height * 0.12))
+    return max(0, left - pad_x), max(0, top - pad_y), min(width, right + pad_x), min(height, bottom + pad_y)
+
+
+def _tighten_visible_ink_crop(image: Image.Image) -> Image.Image:
+    gray = image.convert("L")
+    px = gray.load()
+    dark_pixels: list[tuple[int, int]] = []
+    for y in range(gray.height):
+        for x in range(gray.width):
+            if px[x, y] < 185:
+                dark_pixels.append((x, y))
+    if len(dark_pixels) < 50:
+        return image
+    xs = [point[0] for point in dark_pixels]
+    ys = [point[1] for point in dark_pixels]
+    pad_x = max(12, int((max(xs) - min(xs)) * 0.10))
+    pad_y = max(10, int((max(ys) - min(ys)) * 0.18))
+    left = max(0, min(xs) - pad_x)
+    top = max(0, min(ys) - pad_y)
+    right = min(image.width, max(xs) + pad_x)
+    bottom = min(image.height, max(ys) + pad_y)
+    if right - left < 16 or bottom - top < 10:
+        return image
+    return image.crop((left, top, right, bottom))

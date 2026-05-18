@@ -1,0 +1,11 @@
+.git/
+.venv/
+__pycache__/
+.pytest_cache/
+node_modules/
+data/
+.env.local
+*.pyc
+*.pyo
+*.log
+Downloads/
