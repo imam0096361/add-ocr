@@ -27,7 +27,7 @@ cp .env.docker.example .env.local
 nano .env.local
 ```
 
-Put the Gemini key in `.env.local`:
+Put the Gemini key in `.env.local` or `.env`:
 
 ```env
 GEMINI_API_KEY=your-gemini-api-key-here

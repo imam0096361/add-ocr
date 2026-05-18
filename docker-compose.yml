@@ -8,6 +8,8 @@ services:
     ports:
       - "8000:8000"
     env_file:
+      - path: .env
+        required: false
       - path: .env.local
         required: false
     environment:

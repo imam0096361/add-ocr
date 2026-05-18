@@ -9,15 +9,17 @@ from .storage import DATA_DIR, ROOT
 
 SETTINGS_PATH = DATA_DIR / "settings.json"
 ENV_LOCAL_PATH = ROOT / ".env.local"
+ENV_PATH = ROOT / ".env"
 
 
 def get_api_key() -> str | None:
     env_key = os.getenv("GEMINI_API_KEY")
     if env_key:
         return env_key.strip()
-    env_local_key = read_env_local().get("GEMINI_API_KEY")
-    if env_local_key:
-        return env_local_key.strip()
+    for _, values in read_env_files():
+        file_key = values.get("GEMINI_API_KEY")
+        if file_key:
+            return file_key.strip()
     settings = read_settings()
     api_key = settings.get("gemini_api_key")
     return api_key.strip() if isinstance(api_key, str) and api_key.strip() else None
@@ -26,8 +28,9 @@ def get_api_key() -> str | None:
 def api_key_source() -> str | None:
     if os.getenv("GEMINI_API_KEY"):
         return "environment"
-    if read_env_local().get("GEMINI_API_KEY"):
-        return ".env.local"
+    for path, values in read_env_files():
+        if values.get("GEMINI_API_KEY"):
+            return path.name
     if read_settings().get("gemini_api_key"):
         return "local settings"
     return None
@@ -47,10 +50,18 @@ def read_settings() -> dict[str, str]:
 
 
 def read_env_local() -> dict[str, str]:
-    if not ENV_LOCAL_PATH.exists():
+    return read_env_file(ENV_LOCAL_PATH)
+
+
+def read_env_files() -> list[tuple[Path, dict[str, str]]]:
+    return [(path, read_env_file(path)) for path in (ENV_LOCAL_PATH, ENV_PATH)]
+
+
+def read_env_file(path: Path) -> dict[str, str]:
+    if not path.exists():
         return {}
     values: dict[str, str] = {}
-    for line in ENV_LOCAL_PATH.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         clean = line.strip()
         if not clean or clean.startswith("#") or "=" not in clean:
             continue

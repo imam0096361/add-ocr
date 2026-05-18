@@ -49,13 +49,13 @@ Full Ubuntu server steps are in [deploy/ubuntu-docker.md](deploy/ubuntu-docker.m
 
 ## Gemini key
 
-Create `.env.local` in this project folder:
+Create `.env.local` or `.env` in this project folder:
 
 ```env
 GEMINI_API_KEY=your-gemini-api-key-here
 ```
 
-The app reads `GEMINI_API_KEY` from environment variables first, then `.env.local`, then the local in-app settings file. If no key is set, the app still runs in demo mode and uses any matching reference files under `abc/Prepare Matter` where available. Production OCR requires Gemini.
+The app reads `GEMINI_API_KEY` from environment variables first, then `.env.local`, then `.env`, then the local in-app settings file. If no key is set, the app still runs in demo mode and uses any matching reference files under `abc/Prepare Matter` where available. Production OCR requires Gemini.
 
 ## Outputs
 

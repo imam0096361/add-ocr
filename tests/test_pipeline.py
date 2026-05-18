@@ -68,6 +68,7 @@ def test_api_demo_convert_and_export() -> None:
 def test_api_key_settings_save_and_clear(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr("ocr_app.settings.ENV_LOCAL_PATH", tmp_path / ".env.local")
+    monkeypatch.setattr("ocr_app.settings.ENV_PATH", tmp_path / ".env")
     clear_api_key()
     client = TestClient(app)
     initial = client.get("/api/settings")
@@ -82,6 +83,19 @@ def test_api_key_settings_save_and_clear(monkeypatch, tmp_path) -> None:
     cleared = client.delete("/api/settings/gemini-key")
     assert cleared.status_code == 200
     assert cleared.json()["has_gemini_api_key"] is False
+
+
+def test_api_key_settings_reads_env_file(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr("ocr_app.settings.ENV_LOCAL_PATH", tmp_path / ".env.local")
+    monkeypatch.setattr("ocr_app.settings.ENV_PATH", tmp_path / ".env")
+    (tmp_path / ".env").write_text("GEMINI_API_KEY=AIzaSyExampleEnvFileKey123456\n", encoding="utf-8")
+    clear_api_key()
+    client = TestClient(app)
+    response = client.get("/api/settings")
+    assert response.status_code == 200
+    assert response.json()["has_gemini_api_key"] is True
+    assert response.json()["source"] == ".env"
 
 
 def test_numbered_form_table_restores_missing_colon_column() -> None:

@@ -84,7 +84,7 @@ async function refreshSettings(openWhenMissing) {
     apiKeyHelp.textContent = `A Gemini API key is available${source}. Paste a new key to replace the in-app saved key.`;
   } else {
     apiKeyBtn.textContent = "Add Gemini API Key";
-    apiKeyHelp.textContent = "Add GEMINI_API_KEY in .env.local, or save it here for this computer.";
+    apiKeyHelp.textContent = "Add GEMINI_API_KEY in .env or .env.local, or save it here for this computer.";
     if (openWhenMissing) apiKeyDialog.showModal();
   }
 }
