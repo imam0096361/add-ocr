@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import re
 from pathlib import Path
 
 from docx import Document
@@ -58,7 +59,12 @@ def build_docx(layout: DocumentLayout, output_path: Path, mode: str, bijoy: bool
             doc.add_section(WD_SECTION.NEW_PAGE)
         _setup_section(doc.sections[-1], mode=mode)
         page_blocks = _prepare_faithful_blocks(page.blocks) if mode == "faithful" else page.blocks
-        signature_blocks = _find_bottom_signature_blocks(page_blocks) if mode == "faithful" else []
+        has_signature_artifact = _has_signature_artifact(page_blocks)
+        signature_blocks = (
+            _find_bottom_signature_blocks(page_blocks, allow_single=mode != "faithful")
+            if mode == "faithful" or not has_signature_artifact
+            else []
+        )
         signature_ids = {block.id for block in signature_blocks}
         for block in sorted(page_blocks, key=lambda b: (b.bbox.y, b.bbox.x)):
             if block.id in signature_ids:
@@ -166,8 +172,9 @@ def _add_page_label(doc: Document, page_number: int, demo_mode: bool) -> None:
 
 def _add_text_block(doc: Document, block: LayoutBlock, faithful: bool, bijoy: bool) -> list[str]:
     style = "Heading 1" if block.type == BlockType.HEADING else "Normal"
+    text = _normalize_editable_text(block.text)
     p = doc.add_paragraph(style=style)
-    p.alignment = _alignment_from_bbox(block)
+    p.alignment = _editable_alignment(block, text)
     p.paragraph_format.space_before = Pt(0)
     p.paragraph_format.space_after = Pt(0 if faithful else 6)
     font_size = _faithful_font_size(block) if faithful else Pt(11)
@@ -180,13 +187,23 @@ def _add_text_block(doc: Document, block: LayoutBlock, faithful: bool, bijoy: bo
         _apply_faithful_paragraph_geometry(p, block)
     return _add_multiline_run(
         p,
-        block.text,
+        text,
         font_name=BIJOY_FONT if bijoy else UNICODE_BANGLA_FONT,
         size=font_size,
         bold=block.type == BlockType.HEADING,
         underline=block.underline,
         bijoy_mixed=bijoy,
     )
+
+
+def _normalize_editable_text(text: str) -> str:
+    return "\n".join(re.sub(r"[ \t\u00a0]+", " ", line).strip() for line in text.splitlines())
+
+
+def _editable_alignment(block: LayoutBlock, text: str):
+    if block.alignment == "justify" and len(text.splitlines()) > 1:
+        return WD_ALIGN_PARAGRAPH.LEFT
+    return _alignment_from_bbox(block)
 
 
 def _prepare_faithful_blocks(blocks: list[LayoutBlock]) -> list[LayoutBlock]:
@@ -834,7 +851,16 @@ def _add_artifact(
     run.font.color.rgb = RGBColor(90, 90, 90)
 
 
-def _find_bottom_signature_blocks(blocks: list[LayoutBlock]) -> list[LayoutBlock]:
+def _has_signature_artifact(blocks: list[LayoutBlock]) -> bool:
+    return any(
+        block.type == BlockType.ARTIFACT
+        and block.artifact_type in {"signature", "handwriting"}
+        and block.bbox.y > 0.55
+        for block in blocks
+    )
+
+
+def _find_bottom_signature_blocks(blocks: list[LayoutBlock], allow_single: bool = False) -> list[LayoutBlock]:
     candidates = [
         block
         for block in blocks
@@ -843,6 +869,8 @@ def _find_bottom_signature_blocks(blocks: list[LayoutBlock]) -> list[LayoutBlock
         and block.bbox.w > 0.22
         and len(block.text.splitlines()) >= 3
     ]
+    if allow_single and len(candidates) == 1:
+        return candidates
     if len(candidates) < 2:
         return []
     candidates.sort(key=lambda block: (block.bbox.y, block.bbox.x))

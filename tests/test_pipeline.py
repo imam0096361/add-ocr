@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
@@ -158,6 +159,36 @@ def test_bijoy_export_keeps_english_runs_times_new_roman(tmp_path) -> None:
     assert (" English 2026", "Times New Roman") in runs
 
 
+def test_column_export_keeps_justified_hard_lines_editable(tmp_path) -> None:
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (800, 1000), "white").save(image_path)
+    layout = DocumentLayout(
+        source_pdf="sample.pdf",
+        pages=[
+            PageLayout(
+                page_index=0,
+                width_px=800,
+                height_px=1000,
+                image_path=str(image_path),
+                blocks=[
+                    LayoutBlock(
+                        id="body",
+                        type="paragraph",
+                        text="প্রকাশ       করা\nহইবে       যেদিন",
+                        bbox=BoundingBox(x=0.08, y=0.18, w=0.82, h=0.08),
+                        confidence=1,
+                        alignment="justify",
+                    )
+                ],
+            )
+        ],
+    )
+    build_docx(layout, tmp_path / "column.docx", mode="column", bijoy=False)
+    doc = Document(tmp_path / "column.docx")
+    assert doc.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.LEFT
+    assert doc.paragraphs[0].text == "প্রকাশ করা\nহইবে যেদিন"
+
+
 def test_four_column_form_table_uses_narrow_serial_and_colon_columns() -> None:
     from docx import Document
 
@@ -301,6 +332,46 @@ def test_column_export_uses_detected_signature_artifact_not_inferred_crop(tmp_pa
     crop_dir = tmp_path / "artifact-crops"
     assert (crop_dir / "page-1-sig_artifact.png").exists()
     assert not list(crop_dir.glob("page-1-signature-*.png"))
+
+
+def test_column_export_falls_back_to_signature_crop_when_artifact_missing(tmp_path) -> None:
+    image_path = tmp_path / "page.png"
+    image = Image.new("RGB", (800, 1000), "white")
+    draw = ImageDraw.Draw(image)
+    draw.line((170, 725, 310, 695), fill="black", width=5)
+    draw.line((510, 725, 660, 695), fill="black", width=5)
+    image.save(image_path)
+    layout = DocumentLayout(
+        source_pdf="sample.pdf",
+        pages=[
+            PageLayout(
+                page_index=0,
+                width_px=800,
+                height_px=1000,
+                image_path=str(image_path),
+                blocks=[
+                    LayoutBlock(
+                        id="left_signatory",
+                        type="paragraph",
+                        text="Left officer\nDesignation\nOffice",
+                        bbox=BoundingBox(x=0.18, y=0.78, w=0.28, h=0.08),
+                        confidence=1,
+                    ),
+                    LayoutBlock(
+                        id="right_signatory",
+                        type="paragraph",
+                        text="Right officer\nDesignation\nOffice",
+                        bbox=BoundingBox(x=0.58, y=0.78, w=0.28, h=0.08),
+                        confidence=1,
+                    ),
+                ],
+            )
+        ],
+    )
+    build_docx(layout, tmp_path / "column.docx", mode="column", bijoy=False)
+    crop_dir = tmp_path / "artifact-crops"
+    assert (crop_dir / "page-1-signature-left_signatory.png").exists()
+    assert (crop_dir / "page-1-signature-right_signatory.png").exists()
 
 
 def test_table_geometry_uses_source_grid_line_ratios(tmp_path) -> None:
